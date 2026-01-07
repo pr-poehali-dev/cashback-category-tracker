@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -46,6 +46,10 @@ const Index = () => {
   const [newCard, setNewCard] = useState({ name: '', bank: '', color: '#8B5CF6' });
   const [newCategory, setNewCategory] = useState({ name: '', cashback: 0, cardId: '', icon: 'Star' });
   const [activeTab, setActiveTab] = useState('categories');
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [uploadedImage, setUploadedImage] = useState<string | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<any>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const addCard = () => {
     if (newCard.name && newCard.bank) {
@@ -68,6 +72,69 @@ const Index = () => {
 
   const deleteCategory = (id: string) => {
     setCategories(categories.filter(cat => cat.id !== id));
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 10 * 1024 * 1024) {
+      alert('Файл слишком большой. Максимальный размер: 10 МБ');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const base64Image = event.target?.result as string;
+      setUploadedImage(base64Image);
+      await analyzeImage(base64Image);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const analyzeImage = async (base64Image: string) => {
+    setIsAnalyzing(true);
+    setAnalysisResult(null);
+
+    try {
+      const response = await fetch('https://functions.poehali.dev/89dd295f-fcf8-4033-856c-0066e9e82a11', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ image: base64Image }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Ошибка анализа изображения');
+      }
+
+      const result = await response.json();
+      setAnalysisResult(result);
+    } catch (error) {
+      console.error('Error analyzing image:', error);
+      alert('Ошибка при анализе изображения. Проверьте, что OpenAI API ключ настроен.');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const addCategoriesFromAnalysis = () => {
+    if (!analysisResult?.categories) return;
+
+    const defaultCardId = cards[0]?.id || '';
+    const newCategories = analysisResult.categories.map((cat: any) => ({
+      id: Date.now().toString() + Math.random(),
+      name: cat.name,
+      cashback: cat.cashback,
+      cardId: defaultCardId,
+      icon: cat.icon || 'Star',
+    }));
+
+    setCategories([...categories, ...newCategories]);
+    setAnalysisResult(null);
+    setUploadedImage(null);
+    setActiveTab('categories');
   };
 
   const chartData = categories.map(cat => ({
@@ -394,15 +461,85 @@ const Index = () => {
             <Card>
               <CardHeader>
                 <CardTitle>Загрузка скриншота</CardTitle>
-                <p className="text-sm text-muted-foreground">Распознавание категорий и кэшбэка из приложения банка</p>
+                <p className="text-sm text-muted-foreground">Распознавание категорий и кэшбэка из приложения банка через AI</p>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="border-2 border-dashed border-border rounded-lg p-12 text-center hover:border-primary transition-colors cursor-pointer">
-                  <Icon name="Upload" size={48} className="mx-auto mb-4 text-muted-foreground" />
-                  <p className="text-lg font-medium mb-2">Перетащите скриншот сюда</p>
-                  <p className="text-sm text-muted-foreground mb-4">или нажмите для выбора файла</p>
-                  <Button>Выбрать файл</Button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleFileSelect}
+                  className="hidden"
+                />
+                <div
+                  className="border-2 border-dashed border-border rounded-lg p-12 text-center hover:border-primary transition-colors cursor-pointer"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  {isAnalyzing ? (
+                    <>
+                      <Icon name="Loader2" size={48} className="mx-auto mb-4 text-primary animate-spin" />
+                      <p className="text-lg font-medium mb-2">Анализирую скриншот...</p>
+                      <p className="text-sm text-muted-foreground">GPT-4 Vision распознаёт категории кэшбэка</p>
+                    </>
+                  ) : uploadedImage ? (
+                    <>
+                      <Icon name="CheckCircle2" size={48} className="mx-auto mb-4 text-green-500" />
+                      <p className="text-lg font-medium mb-2">Изображение загружено</p>
+                      <p className="text-sm text-muted-foreground mb-4">Нажмите для загрузки нового</p>
+                    </>
+                  ) : (
+                    <>
+                      <Icon name="Upload" size={48} className="mx-auto mb-4 text-muted-foreground" />
+                      <p className="text-lg font-medium mb-2">Перетащите скриншот сюда</p>
+                      <p className="text-sm text-muted-foreground mb-4">или нажмите для выбора файла</p>
+                      <Button>Выбрать файл</Button>
+                    </>
+                  )}
                 </div>
+
+                {uploadedImage && (
+                  <div className="rounded-lg overflow-hidden border border-border">
+                    <img src={uploadedImage} alt="Uploaded" className="w-full h-64 object-contain bg-muted" />
+                  </div>
+                )}
+
+                {analysisResult && (
+                  <Card className="border-primary/50 bg-primary/5">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Icon name="Sparkles" className="text-primary" size={24} />
+                        Результаты анализа
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {analysisResult.bank && (
+                        <div>
+                          <p className="text-sm text-muted-foreground">Банк</p>
+                          <p className="text-lg font-semibold">{analysisResult.bank}</p>
+                        </div>
+                      )}
+                      <div>
+                        <p className="text-sm text-muted-foreground mb-2">Найдено категорий: {analysisResult.categories?.length || 0}</p>
+                        <div className="space-y-2">
+                          {analysisResult.categories?.map((cat: any, idx: number) => (
+                            <div key={idx} className="flex items-center justify-between p-3 bg-background rounded-lg">
+                              <div className="flex items-center gap-3">
+                                <Icon name={cat.icon} size={20} className="text-primary" />
+                                <span className="font-medium">{cat.name}</span>
+                              </div>
+                              <Badge variant="secondary" className="font-bold">{cat.cashback}%</Badge>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <Button onClick={addCategoriesFromAnalysis} className="w-full gap-2">
+                        <Icon name="Plus" size={16} />
+                        Добавить {analysisResult.categories?.length || 0} категорий
+                      </Button>
+                    </CardContent>
+                  </Card>
+                )}
+
                 <div className="bg-muted/50 rounded-lg p-4">
                   <div className="flex items-start gap-3">
                     <Icon name="Info" size={20} className="text-primary mt-0.5" />
