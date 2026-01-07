@@ -78,6 +78,8 @@ def handler(event: dict, context) -> dict:
         if ',' in image_base64:
             image_base64 = image_base64.split(',')[1]
         
+        print(f"Analyzing image, size: {len(image_base64)} chars")
+        
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
@@ -141,6 +143,8 @@ def handler(event: dict, context) -> dict:
         }
     
     except json.JSONDecodeError as e:
+        print(f"JSON decode error: {str(e)}")
+        print(f"Raw response: {result_text if 'result_text' in locals() else 'No response'}")
         return {
             'statusCode': 500,
             'headers': {
@@ -156,6 +160,9 @@ def handler(event: dict, context) -> dict:
         }
     
     except Exception as e:
+        print(f"Error: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return {
             'statusCode': 500,
             'headers': {
@@ -164,7 +171,8 @@ def handler(event: dict, context) -> dict:
             },
             'body': json.dumps({
                 'error': 'Internal server error',
-                'details': str(e)
+                'message': str(e),
+                'type': type(e).__name__
             }),
             'isBase64Encoded': False
         }
